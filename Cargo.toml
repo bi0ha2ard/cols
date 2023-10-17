@@ -1,0 +1,9 @@
+[package]
+name = "colcon_ls"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.75"
+serde = { version = "1.0.189", features = ["derive"] }
+serde-xml-rs = "0.6.0"
