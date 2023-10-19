@@ -5,5 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.75"
+clap = { version = "4.4.6", features = ["derive", "std", "help", "usage", "error-context"], default-features = false }
+itertools = "0.11.0"
 serde = { version = "1.0.189", features = ["derive"] }
 serde-xml-rs = "0.6.0"
