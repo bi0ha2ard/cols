@@ -204,7 +204,6 @@ fn main() -> io::Result<()> {
 
             let unique_paths = preprocess_paths(&list_args.paths);
             for to_check in &unique_paths {
-                println!("Checking {:?}", to_check);
                 find_packages(&to_check, &mut res, list_args, false)?;
             }
 
@@ -212,7 +211,6 @@ fn main() -> io::Result<()> {
                 find_packages(Path::new("."), &mut res, list_args, true)?;
             } else {
                 for p in preprocess_paths(&list_args.base_paths) {
-                    println!("Checking recursively in {:?}", p);
                     find_packages(&p, &mut res, list_args, true)?;
                 }
             }
