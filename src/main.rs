@@ -141,6 +141,7 @@ fn find_packages(
 #[command(author, version, about, long_about = None)]
 struct MainArgs {
     /// Unused, we don't log anything
+    #[arg(long)]
     log_base: Option<String>,
 
     #[command(subcommand)]
