@@ -1,7 +1,10 @@
 [package]
-name = "colcon_ls"
+name = "cols"
+description = "A faster `colcon list` replacement for fuzzy-finders"
 version = "0.1.0"
 edition = "2021"
+readme = "README.md"
+license = "ISC"
 
 [dependencies]
 anyhow = "1.0.75"
