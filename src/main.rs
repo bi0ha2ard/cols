@@ -12,7 +12,9 @@ fn default_build_type() -> String {
 }
 
 fn default_export() -> Export {
-    Export{ build_type: default_build_type() }
+    Export {
+        build_type: default_build_type(),
+    }
 }
 
 #[derive(Deserialize)]
@@ -64,7 +66,7 @@ enum SearchOutcome {
 static IGNORE_MARKERS: [&str; 3] = ["COLCON_IGNORE", "CATKIN_IGNORE", "AMENT_IGNORE"];
 
 // TODO: follow symlinks?
-fn check_path(dir: &PathBuf) -> SearchOutcome {
+fn check_path(dir: &Path) -> SearchOutcome {
     use SearchOutcome::*;
     if !dir.is_dir() {
         return SearchOutcome::IsFile {};
@@ -91,7 +93,7 @@ fn check_path(dir: &PathBuf) -> SearchOutcome {
             Ok(pkg) => {
                 return Found(Entry {
                     pkg,
-                    path: dir.clone(),
+                    path: dir.to_path_buf(),
                 });
             }
             Err(_e) => {
@@ -99,41 +101,38 @@ fn check_path(dir: &PathBuf) -> SearchOutcome {
             }
         }
     }
-    return Recurse {};
+    Recurse {}
 }
 
 fn parse_package(xml_file: &PathBuf) -> Result<Package> {
     let f = File::open(xml_file)?;
     let reader = BufReader::new(f);
     let p: Package = from_reader(reader)?;
-    return Ok(p);
+    Ok(p)
 }
 
 fn find_packages(
     dir: &Path,
     results: &mut Vec<Entry>,
-    args: &ListArgs,
     recurse: bool,
 ) -> io::Result<()> {
     if !dir.is_dir() {
         return Ok(());
     }
     use SearchOutcome::*;
-    for entry in fs::read_dir(dir)? {
-        if let Ok(e) = entry {
-            let check_outcome = check_path(&e.path());
-            match check_outcome {
-                Found(entry) => {
-                    results.push(entry);
-                }
-                Recurse if recurse => {
-                    find_packages(&e.path(), results, args, recurse)?;
-                }
-                _ => {}
+    for entry in (fs::read_dir(dir)?).flatten() {
+        let check_outcome = check_path(&entry.path());
+        match check_outcome {
+            Found(entry) => {
+                results.push(entry);
             }
+            Recurse if recurse => {
+                find_packages(&entry.path(), results, recurse)?;
+            }
+            _ => {}
         }
     }
-    return Ok(());
+    Ok(())
 }
 
 /// Fast colcon list replacement
@@ -188,7 +187,7 @@ enum Commands {
     List(ListArgs),
 }
 
-fn preprocess_paths(raw: &Vec<std::path::PathBuf>) -> Vec<std::path::PathBuf> {
+fn preprocess_paths(raw: &[std::path::PathBuf]) -> Vec<std::path::PathBuf> {
     return raw
         .iter()
         .dedup()
@@ -205,14 +204,14 @@ fn main() -> io::Result<()> {
 
             let unique_paths = preprocess_paths(&list_args.paths);
             for to_check in &unique_paths {
-                find_packages(&to_check, &mut res, list_args, false)?;
+                find_packages(to_check, &mut res, false)?;
             }
 
             if unique_paths.is_empty() && list_args.base_paths.is_empty() {
-                find_packages(Path::new("."), &mut res, list_args, true)?;
+                find_packages(Path::new("."), &mut res, true)?;
             } else {
                 for p in preprocess_paths(&list_args.base_paths) {
-                    find_packages(&p, &mut res, list_args, true)?;
+                    find_packages(&p, &mut res, true)?;
                 }
             }
 
@@ -225,5 +224,5 @@ fn main() -> io::Result<()> {
             }
         }
     }
-    return Ok(());
+    Ok(())
 }
