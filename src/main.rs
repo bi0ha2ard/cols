@@ -111,11 +111,7 @@ fn parse_package(xml_file: &PathBuf) -> Result<Package> {
     Ok(p)
 }
 
-fn find_packages(
-    dir: &Path,
-    results: &mut Vec<Entry>,
-    recurse: bool,
-) -> io::Result<()> {
+fn find_packages(dir: &Path, results: &mut Vec<Entry>, recurse: bool) -> io::Result<()> {
     if !dir.is_dir() {
         return Ok(());
     }
@@ -132,6 +128,14 @@ fn find_packages(
             _ => {}
         }
     }
+    Ok(())
+}
+
+fn find_wrapper(dir: &Path, results: &mut Vec<Entry>, recurse: bool) -> io::Result<()> {
+    if let SearchOutcome::Found(entry) = check_path(dir) {
+        results.push(entry);
+    }
+    find_packages(dir, results, recurse)?;
     Ok(())
 }
 
@@ -204,14 +208,14 @@ fn main() -> io::Result<()> {
 
             let unique_paths = preprocess_paths(&list_args.paths);
             for to_check in &unique_paths {
-                find_packages(to_check, &mut res, false)?;
+                find_wrapper(to_check, &mut res, false)?;
             }
 
             if unique_paths.is_empty() && list_args.base_paths.is_empty() {
-                find_packages(Path::new("."), &mut res, true)?;
+                find_wrapper(Path::new("."), &mut res, true)?;
             } else {
                 for p in preprocess_paths(&list_args.base_paths) {
-                    find_packages(&p, &mut res, true)?;
+                    find_wrapper(&p, &mut res, true)?;
                 }
             }
 
