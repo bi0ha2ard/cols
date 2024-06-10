@@ -139,6 +139,89 @@ fn find_wrapper(dir: &Path, results: &mut Vec<Entry>, recurse: bool) -> io::Resu
     Ok(())
 }
 
+fn preprocess_paths(raw: &[std::path::PathBuf]) -> Vec<std::path::PathBuf> {
+    return raw
+        .iter()
+        .dedup()
+        .map(|p| p.canonicalize().unwrap_or(p.clone()))
+        .dedup()
+        .collect();
+}
+
+fn collect_packages_from_args(
+    raw_paths: &[std::path::PathBuf],
+    base_paths: &[std::path::PathBuf],
+) -> io::Result<Vec<Entry>> {
+    let mut res = Vec::<Entry>::new();
+
+    let unique_paths = preprocess_paths(raw_paths);
+    for to_check in &unique_paths {
+        find_wrapper(to_check, &mut res, false)?;
+    }
+
+    if unique_paths.is_empty() && base_paths.is_empty() {
+        find_wrapper(Path::new("."), &mut res, true)?;
+    } else {
+        preprocess_paths(base_paths)
+            .into_iter()
+            .map(|p| find_wrapper(&p, &mut res, true))
+            .collect::<io::Result<Vec<_>>>()?;
+    }
+    Ok(res)
+}
+
+macro_rules! print_unless_quiet {
+    ($i:ident, $($arg:tt)*) => {
+        if !$i {
+            println!($($arg)*);
+        }
+    };
+}
+
+fn try_symlink(entry: &Entry, build_base: std::path::PathBuf, quiet: bool, force: bool) {
+    let mut cmake_file = entry.path.clone();
+    cmake_file.push("CMakeLists.txt");
+    if !cmake_file.exists() {
+        print_unless_quiet!(
+            quiet,
+            "[INFO] Skipping {} because no CMakeLists.txt was found @ {}.",
+            entry.pkg.name,
+            cmake_file.to_string_lossy()
+        );
+        return;
+    }
+    let mut link_in_src_space = cmake_file;
+    link_in_src_space.pop();
+    link_in_src_space.push("compile_commands.json");
+    let mut build_base = build_base;
+    build_base.push(entry.pkg.name.clone());
+    build_base.push("compile_commands.json");
+
+    if link_in_src_space.is_symlink() && force {
+        print_unless_quiet!(
+            quiet,
+            "[WARNING] Removing existing symlink in {}",
+            link_in_src_space.to_string_lossy()
+        );
+        if let Err(e) = std::fs::remove_file(&link_in_src_space) {
+            print_unless_quiet!(quiet, "[ERROR] Couldn't remove symlink: {}", e);
+            return;
+        }
+    }
+
+    if let Err(e) = std::os::unix::fs::symlink(&build_base, &link_in_src_space) {
+        print_unless_quiet!(quiet, "[ERROR] Couldn't create symlink: {}", e);
+        return;
+    }
+    print_unless_quiet!(
+        quiet,
+        "[INFO] Created link for {} from {} -> {}",
+        entry.pkg.name,
+        link_in_src_space.to_string_lossy(),
+        build_base.to_string_lossy()
+    );
+}
+
 /// Fast colcon list replacement
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -185,39 +268,54 @@ struct ListArgs {
     paths: Vec<std::path::PathBuf>,
 }
 
+#[derive(Args)]
+struct SymlinkArgs {
+    /// The base paths to recursively crawl for packages
+    #[arg(long, num_args = 0..)]
+    base_paths: Vec<std::path::PathBuf>,
+
+    /// The paths to check for a package. Use shell wildcards (e.g. `src/*`) to select all direct subdirectories
+    /// TODO: we don't do globs yet
+    #[arg(long, num_args = 0..)]
+    paths: Vec<std::path::PathBuf>,
+
+    /// The base path for all build directories
+    #[arg(long)]
+    build_base: std::path::PathBuf,
+
+    /// Don't print anything
+    #[arg(short = 'q', long, default_value_t = false)]
+    quiet: bool,
+
+    /// Whether to re-create existing links
+    #[arg(short = 'f', long, default_value_t = false)]
+    force: bool,
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// List packages, optionally in topological ordering.
     List(ListArgs),
+
+    /// (Non-standard) Creates symlinks from src/<pkg>/compile_commands.json -> build/<pkg>/compile_commands.json
+    Symlink(SymlinkArgs),
 }
 
-fn preprocess_paths(raw: &[std::path::PathBuf]) -> Vec<std::path::PathBuf> {
-    return raw
-        .iter()
-        .dedup()
-        .map(|p| p.canonicalize().unwrap_or(p.clone()))
-        .dedup()
-        .collect();
+fn rel_to_cwd(build_base: PathBuf) -> PathBuf {
+    match std::env::current_dir() {
+        Ok(mut d) => {
+            d.push(build_base);
+            d
+        }
+        Err(_) => build_base,
+    }
 }
 
 fn main() -> io::Result<()> {
     let args = MainArgs::parse();
     match &args.command {
         Commands::List(list_args) => {
-            let mut res = Vec::<Entry>::new();
-
-            let unique_paths = preprocess_paths(&list_args.paths);
-            for to_check in &unique_paths {
-                find_wrapper(to_check, &mut res, false)?;
-            }
-
-            if unique_paths.is_empty() && list_args.base_paths.is_empty() {
-                find_wrapper(Path::new("."), &mut res, true)?;
-            } else {
-                for p in preprocess_paths(&list_args.base_paths) {
-                    find_wrapper(&p, &mut res, true)?;
-                }
-            }
+            let res = collect_packages_from_args(&list_args.paths, &list_args.base_paths)?;
 
             for e in res
                 .iter()
@@ -225,6 +323,21 @@ fn main() -> io::Result<()> {
                 .dedup_by(|a, b| a.pkg.name == b.pkg.name && a.path == b.path)
             {
                 e.print_from_opts(list_args);
+            }
+        }
+        Commands::Symlink(symlink_args) => {
+            let res = collect_packages_from_args(&symlink_args.paths, &symlink_args.base_paths)?;
+            let fixed_build = symlink_args
+                .build_base
+                .canonicalize()
+                .unwrap_or(rel_to_cwd(symlink_args.build_base.clone()));
+            for e in res {
+                try_symlink(
+                    &e,
+                    fixed_build.clone(),
+                    symlink_args.quiet,
+                    symlink_args.force,
+                );
             }
         }
     }

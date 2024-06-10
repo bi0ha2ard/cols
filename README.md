@@ -71,3 +71,18 @@ require('telescope').setup{
     }
 }
 ```
+
+## `compile_commands.json` symlinker
+
+The non-standard `symlink` command can (re-)create symlinks for `compile_commands.json` files from the build space for each package to its source directory.
+This usually helps `clangd` and related tooling discover the build options.
+
+Usage:
+
+```console
+cols symlink --help
+cols symlink --build-base build --base-paths src
+```
+
+Note: Packages that do not contain a `CMakeLists.txt` file will be skipped.
+Existing symlinks will only be recreated if `--force` is used.
